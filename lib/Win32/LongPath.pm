@@ -411,7 +411,7 @@ sub mkdirL {
 sub openL {
     my ($oFH, $sMode, $sPath) = @_;
 
-    $params[0]= Symbol::qualify_to_ref($params[0], caller());
+    $oFH = Symbol::qualify_to_ref($oFH, caller());
     # if (!ref $oFH) {
     #     $oFH = \$_[0];
     #     # croak 'filehandle reference missing!';
