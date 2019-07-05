@@ -8,14 +8,14 @@ use 5.008_000;
 use base 'Exporter';
 use strict;
 use warnings;
-
+use  Symbol;
+use Data::Dumper;
 use Carp;
 require Encode;
 use Fcntl qw(O_APPEND O_BINARY O_CREAT O_RDONLY O_RDWR O_TRUNC O_WRONLY :mode);
 use File::Spec::Functions;
 use Time::Local;
-
-our $COMPAT_MODE = 0;
+# use File::Path;
 
 ##########
 # external constants
@@ -66,7 +66,7 @@ sub FILE_VOLUME_QUOTAS () {0x00000020}
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS, $VERSION);
 BEGIN {
     my @aFuncs =
-        qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL unlinkL utimeL volinfoL);
+        qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL unlinkL utimeL volinfoL rmtree);
     my @aAttribs = qw(
         FILE_ATTRIBUTE_ARCHIVE
         FILE_ATTRIBUTE_COMPRESSED
@@ -408,13 +408,26 @@ sub mkdirL {
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub openL {
-    my ($oFH, $sMode, $sPath) = @_;
+sub openL(*@) {
+    if (ref $_[0]) {
+        return __openL(@_);
+    }
+    if (defined $_[0]) {
+        unshift @_, Symbol::qualify_to_ref(shift, scalar caller);
+    }
+    else {
+        $_[0] = \$_[0];
+    }
+    return __openL(@_);
+}
 
-    $oFH = Symbol::qualify_to_ref($oFH, caller());
+sub __openL {
+    ##########
+    # check parms
+    ##########
+    my ($oFH, $sMode, $sPath) = @_;
     # if (!ref $oFH) {
-    #     $oFH = \$_[0];
-    #     # croak 'filehandle reference missing!';
+    #     croak 'filehandle reference missing!';
     # }
     if (!defined $sMode) {
         croak 'mode missing!';
@@ -435,10 +448,10 @@ sub openL {
     }
     my $oFH1;
     if ($sMode eq '' or $sMode eq '<') {
-        $oFH1 = create_file($sPath, $GENERIC_READ, $OPEN_EXISTING, O_RDONLY);
+        $oFH1 = create_file ($sPath, $GENERIC_READ, $OPEN_EXISTING, O_RDONLY);
     }
     elsif ($sMode eq '+<') {
-        $oFH1 = create_file($sPath, $GENERIC_RW, $OPEN_EXISTING, O_RDWR);
+        $oFH1 = create_file ($sPath, $GENERIC_RW, $OPEN_EXISTING, O_RDWR);
     }
     elsif ($sMode eq '>') {
         $oFH1 = create_file($sPath, $GENERIC_WRITE, $CREATE_ALWAYS, O_TRUNC | O_WRONLY);
@@ -447,7 +460,7 @@ sub openL {
         $oFH1 = create_file($sPath, $GENERIC_RW, $CREATE_ALWAYS, O_RDWR | O_TRUNC);
     }
     elsif ($sMode eq '>>') {
-        $oFH1 = create_file ($sPath, $GENERIC_WRITE, $OPEN_ALWAYS, O_APPEND | O_WRONLY);
+        $oFH1 = create_file($sPath, $GENERIC_WRITE, $OPEN_ALWAYS, O_APPEND | O_WRONLY);
     }
     elsif ($sMode eq '+>>') {
         $oFH1 = create_file ($sPath, $GENERIC_RW, $OPEN_ALWAYS, O_APPEND | O_RDWR);
@@ -470,6 +483,7 @@ sub openL {
     }
     return 1;
 }
+
 
 ###########
 # Read Link Value
@@ -616,28 +630,20 @@ sub statL {
             $oStat->{$sTime} = timegm (split /,/, $oStat->{$sTime});
         }
     }
-    if ($COMPAT_MODE) {
-        return $oStat;
-    }
-    my $result = $oStat;
-    my @retval = ();
-    for my $k (qw/dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks/) {
-        if (!exists $result->{$k}) {
-            $result->{$k} = '';
-        }
-        push @retval, $result->{$k};
-    }
-    return @retval;
-    # return $oStat;
+
+    return $oStat;
+    # my $result = $oStat;
+    # my @retval = ();
+    # for my $k (qw/dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks/) {
+    #     if (!exists $result->{$k}) {
+    #         $result->{$k} = '';
+    #     }
+    #     push @retval, $result->{$k};
+    # }
+    # return @retval;
+    # # return $oStat;
 }
 
-
-sub enableCompatMode {
-    $COMPAT_MODE = 1;
-}
-sub disableCompatMode {
-    $COMPAT_MODE = 0;
-}
 
 ###########
 # Create Symbolic Link
@@ -1219,6 +1225,106 @@ sub _wide_to_utf8 {
     my $sText = $_UTF16->decode (shift);
     $sText =~ s/\x00$//;
     return $sText;
+}
+
+
+sub rmtree {
+    my ($roots, $verbose, $safe) = @_;
+
+    print "Using custom rmtree\n";
+    my $Is_VMS = 0;
+    my $force_writeable = 0;
+
+    my (@files);
+    my ($count) = 0;
+    $verbose ||= 0;
+    $safe ||= 0;
+
+    if (defined($roots) && length($roots)) {
+        $roots = [$roots] unless ref $roots;
+    }
+    else {
+        carp "No root path(s) specified\n";
+        return 0;
+    }
+
+    my ($root);
+    foreach $root (@{$roots}) {
+        $root =~ s#/\z##;
+
+        my $lstat_result = lstatL($root) or next;
+        my $rp = $lstat_result->{mode};
+        $rp &= 07777;	# don't forget setuid, setgid, sticky bits
+        if ( testL('d', $root)) {
+            # notabene: 0700 is for making readable in the first place,
+            # it's also intended to change it to writable in case we have
+            # to recurse in which case we are better than rm -rf for 
+            # subtrees with strange permissions
+            # chmod($rp | 0700, ($Is_VMS ? VMS::Filespec::fileify($root) : $root))
+            #     or carp "Can't make directory $root read+writeable: $!"
+            #     unless $safe;
+
+            my $d = Win32::LongPath->new();
+            # if (opendir my $d, $root) {
+            if ($d->opendirL($root)) {
+                no strict 'refs';
+                if (!defined ${"\cTAINT"} or ${"\cTAINT"}) {
+                    # Blindly untaint dir names
+                    @files = map { /^(.*)$/s ; $1 } $d->readdir();# $d;
+                }
+                else {
+                    @files = $d->readdirL();# $d;
+                }
+                $d->closedirL;
+            }
+            else {
+                carp "Can't read $root: $!";
+                @files = ();
+            }
+
+            # Deleting large numbers of files from VMS Files-11 filesystems
+            # is faster if done in reverse ASCIIbetical order 
+            @files = reverse @files if $Is_VMS;
+            ($root = VMS::Filespec::unixify($root)) =~ s#\.dir\z## if $Is_VMS;
+            @files = map("$root/$_", grep $_!~/^\.{1,2}\z/s,@files);
+            $count += rmtree(\@files,$verbose,$safe);
+            if ($safe && ($Is_VMS ? !&VMS::Filespec::candelete($root) : !testL('w', $root))) {
+                next;
+            }
+            if ($force_writeable) {
+                chmod $rp | 0700, $root or carp "Can't make directory $root writeable: $!";
+            }
+            if (rmdirL($root)) {
+                ++$count;
+            }
+            else {
+                carp "Can't remove directory $root: $!";
+                chmod($rp, ($Is_VMS ? VMS::Filespec::fileify($root) : $root)) or carp("and can't restore permissions to " . sprintf("0%o",$rp) . "\n");
+            }
+        }
+        else {
+            if ($safe && ($Is_VMS ? !&VMS::Filespec::candelete($root) : !(testL('l', $root) || testL('w', $root)))) {
+                print "skipped $root\n" if $verbose;
+                next;
+            }
+            if ($force_writeable) {
+                chmod $rp | 0600, $root or carp "Can't make file $root writeable: $!"
+            }
+            # delete all versions under VMS
+            for (;;) {
+                unless (unlinkL($root)) {
+                    carp "Can't unlink file $root: $!";
+                    if ($force_writeable) {
+                        chmod $rp, $root or carp("and can't restore permissions to " . sprintf("0%o",$rp) . "\n");
+                    }
+                    last;
+                }
+                ++$count;
+                last unless $Is_VMS && lstatL($root);
+            }
+        }
+    }
+    $count;
 }
 
 1;
