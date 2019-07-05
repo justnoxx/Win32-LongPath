@@ -152,6 +152,8 @@ PREINIT:
   GV *gv;
 CODE:
   int fd;
+  char *mode;
+  char *packname = "IO::File";
   HANDLE fh = CreateFileW (path, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
     NULL, dispos, FILE_ATTRIBUTE_NORMAL, NULL);
   if (fh == INVALID_HANDLE_VALUE)
@@ -162,7 +164,7 @@ CODE:
     CloseHandle (fh);
     XSRETURN_EMPTY;
     }
-  char *mode;
+  
   if ((access & (GENERIC_READ | GENERIC_WRITE))
     == (GENERIC_READ | GENERIC_WRITE))
     { mode = "r+"; }
@@ -176,7 +178,7 @@ CODE:
     CloseHandle (fh);
     XSRETURN_EMPTY;
     }
-  char *packname = "IO::File";
+  
   gv = (GV*)SvREFCNT_inc (newGVgen (packname));
   if (gv)
     (void) hv_delete (GvSTASH (gv), GvNAME (gv), GvNAMELEN (gv), G_DISCARD);

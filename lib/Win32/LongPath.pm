@@ -11,10 +11,11 @@ use warnings;
 
 use Carp;
 require Encode;
-use Fcntl
-  qw(O_APPEND O_BINARY O_CREAT O_RDONLY O_RDWR O_TRUNC O_WRONLY :mode);
+use Fcntl qw(O_APPEND O_BINARY O_CREAT O_RDONLY O_RDWR O_TRUNC O_WRONLY :mode);
 use File::Spec::Functions;
 use Time::Local;
+
+our $COMPAT_MODE = 0;
 
 ##########
 # external constants
@@ -63,64 +64,61 @@ sub FILE_VOLUME_QUOTAS () {0x00000020}
 ##########
 
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS, $VERSION);
-BEGIN
-  {
-  my @aFuncs =
-    qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL
-    readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL
-    unlinkL utimeL volinfoL);
-  my @aAttribs = qw(
-    FILE_ATTRIBUTE_ARCHIVE
-    FILE_ATTRIBUTE_COMPRESSED
-    FILE_ATTRIBUTE_DEVICE
-    FILE_ATTRIBUTE_DIRECTORY
-    FILE_ATTRIBUTE_ENCRYPTED
-    FILE_ATTRIBUTE_HIDDEN
-    FILE_ATTRIBUTE_INTEGRITY_STREAM
-    FILE_ATTRIBUTE_NORMAL
-    FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
-    FILE_ATTRIBUTE_NO_SCRUB_DATA
-    FILE_ATTRIBUTE_OFFLINE
-    FILE_ATTRIBUTE_READONLY
-    FILE_ATTRIBUTE_REPARSE_POINT
-    FILE_ATTRIBUTE_SPARSE_FILE
-    FILE_ATTRIBUTE_SYSTEM
-    FILE_ATTRIBUTE_TEMPORARY
-    FILE_ATTRIBUTE_VIRTUAL
+BEGIN {
+    my @aFuncs =
+        qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL unlinkL utimeL volinfoL);
+    my @aAttribs = qw(
+        FILE_ATTRIBUTE_ARCHIVE
+        FILE_ATTRIBUTE_COMPRESSED
+        FILE_ATTRIBUTE_DEVICE
+        FILE_ATTRIBUTE_DIRECTORY
+        FILE_ATTRIBUTE_ENCRYPTED
+        FILE_ATTRIBUTE_HIDDEN
+        FILE_ATTRIBUTE_INTEGRITY_STREAM
+        FILE_ATTRIBUTE_NORMAL
+        FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
+        FILE_ATTRIBUTE_NO_SCRUB_DATA
+        FILE_ATTRIBUTE_OFFLINE
+        FILE_ATTRIBUTE_READONLY
+        FILE_ATTRIBUTE_REPARSE_POINT
+        FILE_ATTRIBUTE_SPARSE_FILE
+        FILE_ATTRIBUTE_SYSTEM
+        FILE_ATTRIBUTE_TEMPORARY
+        FILE_ATTRIBUTE_VIRTUAL
     );
-  my @aVolFlags = qw(
-    FILE_CASE_PRESERVED_NAMES
-    FILE_CASE_SENSITIVE_SEARCH
-    FILE_FILE_COMPRESSION
-    FILE_NAMED_STREAMS
-    FILE_PERSISTENT_ACLS
-    FILE_READ_ONLY_VOLUME
-    FILE_SEQUENTIAL_WRITE_ONCE
-    FILE_SUPPORTS_ENCRYPTION
-    FILE_SUPPORTS_EXTENDED_ATTRIBUTES
-    FILE_SUPPORTS_HARD_LINKS
-    FILE_SUPPORTS_OBJECT_IDS
-    FILE_SUPPORTS_OPEN_BY_FILE_ID
-    FILE_SUPPORTS_REPARSE_POINTS
-    FILE_SUPPORTS_SPARSE_FILES
-    FILE_SUPPORTS_TRANSACTIONS
-    FILE_SUPPORTS_USN_JOURNAL
-    FILE_UNICODE_ON_DISK
-    FILE_VOLUME_IS_COMPRESSED
-    FILE_VOLUME_QUOTAS
+    my @aVolFlags = qw(
+        FILE_CASE_PRESERVED_NAMES
+        FILE_CASE_SENSITIVE_SEARCH
+        FILE_FILE_COMPRESSION
+        FILE_NAMED_STREAMS
+        FILE_PERSISTENT_ACLS
+        FILE_READ_ONLY_VOLUME
+        FILE_SEQUENTIAL_WRITE_ONCE
+        FILE_SUPPORTS_ENCRYPTION
+        FILE_SUPPORTS_EXTENDED_ATTRIBUTES
+        FILE_SUPPORTS_HARD_LINKS
+        FILE_SUPPORTS_OBJECT_IDS
+        FILE_SUPPORTS_OPEN_BY_FILE_ID
+        FILE_SUPPORTS_REPARSE_POINTS
+        FILE_SUPPORTS_SPARSE_FILES
+        FILE_SUPPORTS_TRANSACTIONS
+        FILE_SUPPORTS_USN_JOURNAL
+        FILE_UNICODE_ON_DISK
+        FILE_VOLUME_IS_COMPRESSED
+        FILE_VOLUME_QUOTAS
     );
-  @EXPORT = @aFuncs;
-  @EXPORT_OK = (@aAttribs, @aVolFlags);
-  %EXPORT_TAGS = (
-    all => [@EXPORT, @EXPORT_OK],
-    funcs => [@aFuncs],
-    fileattr => [@aAttribs],
-    volflags => [@aVolFlags]
+    @EXPORT = @aFuncs;
+    @EXPORT_OK = (@aAttribs, @aVolFlags);
+    %EXPORT_TAGS = (
+        all      => [@EXPORT, @EXPORT_OK],
+        funcs    => [@aFuncs],
+        fileattr => [@aAttribs],
+        volflags => [@aVolFlags]
     );
-  $VERSION = '2.0';
-  require XSLoader;
-  XSLoader::load ('Win32::LongPath', $VERSION);
-  }
+    $VERSION = '2.0.1';
+    require XSLoader;
+    XSLoader::load ('Win32::LongPath', $VERSION);
+}
 
 ##########
 # local constants
@@ -135,11 +133,8 @@ my $OPEN_EXISTING = 3;
 my $OPEN_ALWAYS = 4;
 my $TRUNC_EXISTING = 5;
 
-my $NOFILE = FILE_ATTRIBUTE_DEVICE | FILE_ATTRIBUTE_DIRECTORY
-  | FILE_ATTRIBUTE_OFFLINE;
-my $ALL_ATTRIBS = FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_HIDDEN
-  | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | FILE_ATTRIBUTE_OFFLINE
-  | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_TEMPORARY;
+my $NOFILE = FILE_ATTRIBUTE_DEVICE | FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_OFFLINE;
+my $ALL_ATTRIBS = FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED | FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_TEMPORARY;
 
 ##########
 # local varbs
@@ -159,19 +154,20 @@ my $_UTF16 ||= Encode::find_encoding ('utf16-le');
 # OUTPUT: absolute path; undef=error
 ###########
 
-sub abspathL
-
-{
-my $sPath = shift;
-if (!defined $sPath)
-  { croak 'path missing!'; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-my $sLong = get_long_path ($sPath);
-if ($sLong ne '')
-  { $sPath = $sLong; }
-return _denormalize_path ($sPath);
+sub abspathL {
+    my $sPath = shift;
+    if (!defined $sPath) {
+        croak 'path missing!';
+    }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    my $sLong = get_long_path ($sPath);
+    if ($sLong ne '') {
+        $sPath = $sLong;
+    }
+    return _denormalize_path ($sPath);
 }
 
 ###########
@@ -183,65 +179,72 @@ return _denormalize_path ($sPath);
 # OUTPUT: success=1; undef=error
 ###########
 
-sub attribL
+sub attribL {
+    ###########
+    # o get current attributes
+    # o adjust attributes
+    ###########
 
-{
-###########
-# o get current attributes
-# o adjust attributes
-###########
-
-my ($sAttribs, $sPath) = @_;
-if (!defined $sAttribs)
-  { croak 'attributes missing!'; }
-if (!defined $sPath)
-  { croak 'path missing!'; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-my $nAttribs = get_attribs ($sPath);
-if (!defined $nAttribs)
-  { return; }
-$nAttribs &= $ALL_ATTRIBS;
-my $bSet = 1;
-foreach my $sAttrib (split //, lc $sAttribs)
-  {
-  if ($sAttrib eq '+')
-    {
-    $bSet = 1;
-    next;
+    my ($sAttribs, $sPath) = @_;
+    if (!defined $sAttribs) {
+        croak 'attributes missing!';
     }
-  if ($sAttrib eq '-')
-    {
-    $bSet = 0;
-    next;
+    if (!defined $sPath) {
+        croak 'path missing!';
     }
-  my $nMask;
-  if ($sAttrib eq 'a')
-    { $nMask = FILE_ATTRIBUTE_ARCHIVE; }
-  elsif ($sAttrib eq 'h')
-    { $nMask = FILE_ATTRIBUTE_HIDDEN; }
-  elsif ($sAttrib eq 'i')
-    { $nMask = FILE_ATTRIBUTE_NOT_CONTENT_INDEXED; }
-  elsif ($sAttrib eq 'r')
-    { $nMask = FILE_ATTRIBUTE_READONLY; }
-  elsif ($sAttrib eq 's')
-    { $nMask = FILE_ATTRIBUTE_SYSTEM; }
-  else
-    { croak 'invalid attribute!'; }
-  if ($bSet)
-    { $nAttribs |= $nMask; }
-  else
-    { $nAttribs &= ~$nMask; }
-  }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    my $nAttribs = get_attribs ($sPath);
+    if (!defined $nAttribs) {
+        return;
+    }
+    $nAttribs &= $ALL_ATTRIBS;
+    my $bSet = 1;
+    foreach my $sAttrib (split //, lc $sAttribs) {
+        if ($sAttrib eq '+') {
+            $bSet = 1;
+            next;
+        }
+        if ($sAttrib eq '-') {
+            $bSet = 0;
+            next;
+        }
+        my $nMask;
+        if ($sAttrib eq 'a') {
+            $nMask = FILE_ATTRIBUTE_ARCHIVE;
+        }
+        elsif ($sAttrib eq 'h') {
+            $nMask = FILE_ATTRIBUTE_HIDDEN;
+        }
+        elsif ($sAttrib eq 'i') {
+            $nMask = FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+        }
+        elsif ($sAttrib eq 'r') {
+            $nMask = FILE_ATTRIBUTE_READONLY;
+        }
+        elsif ($sAttrib eq 's') {
+            $nMask = FILE_ATTRIBUTE_SYSTEM;
+        }
+        else {
+            croak 'invalid attribute!';
+        }
+        if ($bSet) {
+            $nAttribs |= $nMask;
+        }
+        else {
+            $nAttribs &= ~$nMask;
+        }
+    }
 
-###########
-# set attributes
-###########
-
-if (!set_attribs ($sPath, $nAttribs))
-  { return; }
-return 1;
+    ###########
+    # set attributes
+    ###########
+    if (!set_attribs ($sPath, $nAttribs)) {
+        return;
+    }
+    return 1;
 }
 
 ###########
@@ -252,27 +255,29 @@ return 1;
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub chdirL
-
-{
-my $sPath = shift;
-if (!defined $sPath && exists $ENV {HOME})
-  { $sPath = $ENV {HOME}; }
-elsif (!defined $sPath && exists $ENV {LOGDIR})
-  { $sPath = $ENV {LOGDIR}; }
-if (!defined $sPath)
-  { return $sPath; }
-if ($sPath !~ /[\\\/]$/)
-  { $sPath .= '/'; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-if (set_current_directory ($sPath))
-  {
-  set_last_error (0);
-  return 1;
-  }
-return;
+sub chdirL {
+    my $sPath = shift;
+    if (!defined $sPath && exists $ENV {HOME}) {
+        $sPath = $ENV {HOME};
+    }
+    elsif (!defined $sPath && exists $ENV {LOGDIR}) {
+        $sPath = $ENV {LOGDIR};
+    }
+    if (!defined $sPath) {
+        return $sPath;
+    }
+    if ($sPath !~ /[\\\/]$/) {
+        $sPath .= '/';
+    }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    if (set_current_directory ($sPath)) {
+        set_last_error (0);
+        return 1;
+    }
+    return;
 }
 
 ###########
@@ -284,26 +289,28 @@ return;
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub copyL
+sub copyL {
+    my ($sFrom, $sTo) = @_;
 
-{
-my ($sFrom, $sTo) = @_;
-if (!defined $sFrom)
-  { croak 'from missing!'; }
-if (!defined $sTo)
-  { croak 'to missing!'; }
-$sFrom = _normalize_path ($sFrom);
-if (!defined $sFrom)
-  { return; }
-$sTo = _normalize_path ($sTo);
-if (!defined $sTo)
-  { return; }
-if (copy_file ($sFrom, $sTo))
-  {
-  set_last_error (0);
-  return 1;
-  }
-return;
+    if (!defined $sFrom) {
+        croak 'from missing!';
+    }
+    if (!defined $sTo) {
+        croak 'to missing!';
+    }
+    $sFrom = _normalize_path ($sFrom);
+    if (!defined $sFrom) {
+        return;
+    }
+    $sTo = _normalize_path ($sTo);
+    if (!defined $sTo) {
+        return;
+    }
+    if (copy_file ($sFrom, $sTo)) {
+        set_last_error (0);
+        return 1;
+    }
+    return;
 }
 
 ###########
@@ -313,10 +320,8 @@ return;
 # OUTPUT: cwd
 ###########
 
-sub getcwdL
-
-{
-return _denormalize_path (get_current_directory ());
+sub getcwdL {
+    return _denormalize_path (get_current_directory ());
 }
 
 ###########
@@ -328,32 +333,33 @@ return _denormalize_path (get_current_directory ());
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub linkL
+sub linkL {
+    ###########
+    # o check args
+    # o relative target?
+    # o create link
+    ###########
 
-{
-###########
-# o check args
-# o relative target?
-# o create link
-###########
-
-my ($sTo, $sFrom) = @_;
-if (!defined $sTo)
-  { croak 'oldname missing!'; }
-if (!defined $sFrom)
-  { croak 'newname missing!'; }
-$sTo = _normalize_path ($sTo);
-if (!defined $sTo)
-  { return; }
-$sFrom = _normalize_path ($sFrom);
-if (!defined $sFrom)
-  { return; }
-if (make_hlink ($sTo, $sFrom))
-  {
-  set_last_error (0);
-  return 1;
-  }
-return;
+    my ($sTo, $sFrom) = @_;
+    if (!defined $sTo) {
+        croak 'oldname missing!';
+    }
+    if (!defined $sFrom) {
+        croak 'newname missing!';
+    }
+    $sTo = _normalize_path ($sTo);
+    if (!defined $sTo) {
+        return;
+    }
+    $sFrom = _normalize_path ($sFrom);
+    if (!defined $sFrom) {
+        return;
+    }
+    if (make_hlink ($sTo, $sFrom)) {
+        set_last_error (0);
+        return 1;
+    }
+    return;
 }
 
 ###########
@@ -364,10 +370,8 @@ return;
 # OUTPUT: status object; undef=error
 ###########
 
-sub lstatL
-
-{
-return statL (shift, 1);
+sub lstatL {
+    return statL (shift, 1);
 }
 
 ###########
@@ -378,21 +382,20 @@ return statL (shift, 1);
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub mkdirL
-
-{
-my $sPath = shift;
-if (!defined $sPath)
-  { $sPath = $_; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-if (create_directory ($sPath))
-  {
-  set_last_error (0);
-  return 1;
-  }
-return;
+sub mkdirL {
+    my $sPath = shift;
+    if (!defined $sPath) {
+        $sPath = $_;
+    }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    if (create_directory ($sPath)) {
+        set_last_error (0);
+        return 1;
+    }
+    return;
 }
 
 ###########
@@ -405,72 +408,67 @@ return;
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub openL
+sub openL {
+    my ($oFH, $sMode, $sPath) = @_;
 
-{
-##########
-# check parms
-##########
-
-my ($oFH, $sMode, $sPath) = @_;
-if (!ref $oFH)
-  { croak 'filehandle reference missing!'; }
-if (!defined $sMode)
-  { croak 'mode missing!'; }
-if (!defined $sPath)
-  { croak 'path missing!'; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-my $sLayer = '';
-if ($sMode =~ /^([^\:]*)(\:.*)/)
-  {
-  ($sMode, $sLayer) = ($1, $2);
-  if ($sLayer eq ':')
-    { croak 'invalid layer for openL!'; }
-  }
-my $oFH1;
-if ($sMode eq '' or $sMode eq '<')
-  { $oFH1 = create_file ($sPath, $GENERIC_READ, $OPEN_EXISTING, O_RDONLY); }
-elsif ($sMode eq '+<')
-  { $oFH1 = create_file ($sPath, $GENERIC_RW, $OPEN_EXISTING, O_RDWR); }
-elsif ($sMode eq '>')
-  {
-  $oFH1 = create_file
-    ($sPath, $GENERIC_WRITE, $CREATE_ALWAYS, O_TRUNC | O_WRONLY);
-  }
-elsif ($sMode eq '+>')
-  {
-  $oFH1 = create_file
-    ($sPath, $GENERIC_RW, $CREATE_ALWAYS, O_RDWR | O_TRUNC);
-  }
-elsif ($sMode eq '>>')
-  {
-  $oFH1 = create_file
-    ($sPath, $GENERIC_WRITE, $OPEN_ALWAYS, O_APPEND | O_WRONLY);
-  }
-elsif ($sMode eq '+>>')
-  {
-  $oFH1 = create_file ($sPath, $GENERIC_RW, $OPEN_ALWAYS, O_APPEND | O_RDWR);
-  }
-else
-  { croak 'invalid mode!'; }
-if (!$oFH1)
-  { return; }
-else
-  {
-  # this avoids a bug in Perl 5.22 when opening files w/a scalar reference
-  $$oFH = $oFH1;
-  }
-if ($sLayer ne '')
-  {
-  if (!binmode $$oFH, $sLayer)
-    {
-    close $$oFH;
-    return;
+    $params[0]= Symbol::qualify_to_ref($params[0], caller());
+    # if (!ref $oFH) {
+    #     $oFH = \$_[0];
+    #     # croak 'filehandle reference missing!';
+    # }
+    if (!defined $sMode) {
+        croak 'mode missing!';
     }
-  }
-return 1;
+    if (!defined $sPath) {
+        croak 'path missing!';
+    }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    my $sLayer = '';
+    if ($sMode =~ /^([^\:]*)(\:.*)/) {
+        ($sMode, $sLayer) = ($1, $2);
+        if ($sLayer eq ':') {
+            croak 'invalid layer for openL!';
+        }
+    }
+    my $oFH1;
+    if ($sMode eq '' or $sMode eq '<') {
+        $oFH1 = create_file($sPath, $GENERIC_READ, $OPEN_EXISTING, O_RDONLY);
+    }
+    elsif ($sMode eq '+<') {
+        $oFH1 = create_file($sPath, $GENERIC_RW, $OPEN_EXISTING, O_RDWR);
+    }
+    elsif ($sMode eq '>') {
+        $oFH1 = create_file($sPath, $GENERIC_WRITE, $CREATE_ALWAYS, O_TRUNC | O_WRONLY);
+    }
+    elsif ($sMode eq '+>') {
+        $oFH1 = create_file($sPath, $GENERIC_RW, $CREATE_ALWAYS, O_RDWR | O_TRUNC);
+    }
+    elsif ($sMode eq '>>') {
+        $oFH1 = create_file ($sPath, $GENERIC_WRITE, $OPEN_ALWAYS, O_APPEND | O_WRONLY);
+    }
+    elsif ($sMode eq '+>>') {
+        $oFH1 = create_file ($sPath, $GENERIC_RW, $OPEN_ALWAYS, O_APPEND | O_RDWR);
+    }
+    else {
+        croak 'invalid mode!';
+    }
+    if (!$oFH1) {
+        return;
+    }
+    else {
+        # this avoids a bug in Perl 5.22 when opening files w/a scalar reference
+        $$oFH = $oFH1;
+    }
+    if ($sLayer ne '') {
+        if (!binmode $$oFH, $sLayer) {
+            close $$oFH;
+            return;
+        }
+    }
+    return 1;
 }
 
 ###########
@@ -481,25 +479,25 @@ return 1;
 # OUTPUT: path that link points to; undef=error or unable to find
 ###########
 
-sub readlinkL
-
-{
-##########
-# o get default path if undef
-# o find link
-##########
-
-my $sPath = shift;
-if (!defined $sPath)
-  { $sPath = $_; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-my $sLink = find_link ($sPath);
-if (!defined $sLink)
-  { return; }
-set_last_error (0);
-return _denormalize_path ($sLink);
+sub readlinkL {
+    ##########
+    # o get default path if undef
+    # o find link
+    ##########
+    my $sPath = shift;
+    if (!defined $sPath) {
+        $sPath = $_;
+    }
+    $sPath = _normalize_path($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    my $sLink = find_link ($sPath);
+    if (!defined $sLink) {
+        return;
+    }
+    set_last_error (0);
+    return _denormalize_path ($sLink);
 }
 
 ###########
@@ -511,26 +509,27 @@ return _denormalize_path ($sLink);
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub renameL
-
-{
-my ($sFrom, $sTo) = @_;
-if (!defined $sFrom)
-  { croak 'oldname missing!'; }
-if (!defined $sTo)
-  { croak 'newname missing!'; }
-$sFrom = _normalize_path ($sFrom);
-if (!defined $sFrom)
-  { return; }
-$sTo = _normalize_path ($sTo);
-if (!defined $sTo)
-  { return; }
-if (move_file ($sFrom, $sTo))
-  {
-  set_last_error (0);
-  return 1;
-  }
-return;
+sub renameL {
+    my ($sFrom, $sTo) = @_;
+    if (!defined $sFrom) {
+        croak 'oldname missing!';
+    }
+    if (!defined $sTo) {
+        croak 'newname missing!';
+    }
+    $sFrom = _normalize_path ($sFrom);
+    if (!defined $sFrom) {
+        return;
+    }
+    $sTo = _normalize_path ($sTo);
+    if (!defined $sTo) {
+        return;
+    }
+    if (move_file ($sFrom, $sTo)) {
+        set_last_error (0);
+        return 1;
+    }
+    return;
 }
 
 ###########
@@ -541,21 +540,20 @@ return;
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub rmdirL
-
-{
-my $sPath = shift;
-if (!defined $sPath)
-  { $sPath = $_; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-if (remove_directory ($sPath))
-  {
-  set_last_error (0);
-  return 1;
-  }
-return;
+sub rmdirL {
+    my $sPath = shift;
+    if (!defined $sPath) {
+        $sPath = $_;
+    }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    if (remove_directory ($sPath)) {
+        set_last_error (0);
+        return 1;
+    }
+    return;
 }
 
 ###########
@@ -566,17 +564,17 @@ return;
 # OUTPUT: shortpath; blank=error
 ###########
 
-sub shortpathL
-
-{
-my $sPath = shift;
-if (!defined $sPath)
-  { croak 'path missing!'; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return ''; }
-my $sShort = get_short_path ($sPath);
-return _denormalize_path ($sShort);
+sub shortpathL {
+    my $sPath = shift;
+    if (!defined $sPath) {
+        croak 'path missing!';
+    }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return '';
+    }
+    my $sShort = get_short_path ($sPath);
+    return _denormalize_path ($sShort);
 }
 
 ###########
@@ -588,37 +586,57 @@ return _denormalize_path ($sShort);
 # OUTPUT: status object; undef=error
 ###########
 
-sub statL
+sub statL {
+    ##########
+    # o get default path if undef
+    # o check if lstatL
+    # o get stats
+    # o convert size from large int
+    # o get time as gmtime
+    ##########
 
-{
-##########
-# o get default path if undef
-# o check if lstatL
-# o get stats
-# o convert size from large int
-# o get time as gmtime
-##########
+    my ($sPath, $bLStat) = @_;
+    if (!defined $sPath) {
+        $sPath = $_;
+    }
+    $bLStat = $bLStat ? 1 : 0;
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    my $oStat = get_stat ($sPath, $bLStat);
+    if (!defined $oStat) {
+        return;
+    }
+    $oStat->{size} = $oStat->{size_high} ? (($oStat->{size_high} << 32) + $oStat->{size_low}) : $oStat->{size_low};
+    delete $oStat->{size_high};
+    delete $oStat->{size_low};
+    foreach my $sTime (qw (atime ctime mtime)) {
+        if ($oStat->{$sTime}) {
+            $oStat->{$sTime} = timegm (split /,/, $oStat->{$sTime});
+        }
+    }
+    if ($COMPAT_MODE) {
+        return $oStat;
+    }
+    $result = $oStat;
+    my @retval = ();
+    for my $k (qw/dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks/) {
+        if (!exists $result->{$k}) {
+            $result->{$k} = '';
+        }
+        push @retval, $result->{$k};
+    }
+    return @retval;
+    # return $oStat;
+}
 
-my ($sPath, $bLStat) = @_;
-if (!defined $sPath)
-  { $sPath = $_; }
-$bLStat = $bLStat ? 1 : 0;
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-my $oStat = get_stat ($sPath, $bLStat);
-if (!defined $oStat)
-  { return; }
-$oStat->{size} = $oStat->{size_high}
-  ? (($oStat->{size_high} << 32) + $oStat->{size_low}) : $oStat->{size_low};
-delete $oStat->{size_high};
-delete $oStat->{size_low};
-foreach my $sTime (qw (atime ctime mtime))
-  {
-  if ($oStat->{$sTime})
-    { $oStat->{$sTime} = timegm (split /,/, $oStat->{$sTime}); }
-  }
-return $oStat;
+
+sub enableCompatMode {
+    $COMPAT_MODE = 1;
+}
+sub disableCompatMode {
+    $COMPAT_MODE = 0;
 }
 
 ###########
@@ -630,36 +648,39 @@ return $oStat;
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub symlinkL
+sub symlinkL {
+    ###########
+    # o check args
+    # o relative target?
+    # o create link
+    ###########
+    my ($sTo, $sFrom) = @_;
 
-{
-###########
-# o check args
-# o relative target?
-# o create link
-###########
-
-my ($sTo, $sFrom) = @_;
-if (!defined $sTo)
-  { croak 'oldname missing!'; }
-if (!defined $sFrom)
-  { croak 'newname missing!'; }
-$sTo =~ s#/#\\#g;
-if ($sTo =~ /^\\/ or $sTo =~ /^[a-z]:/i)
-  { $sTo = _normalize_path ($sTo); }
-else
-  { $sTo = $_UTF16->encode ($sTo) . "\x00"; }
-if (!defined $sTo)
-  { return; }
-$sFrom = _normalize_path ($sFrom);
-if (!defined $sFrom)
-  { return; }
-if (make_slink ($sTo, $sFrom))
-  {
-  set_last_error (0);
-  return 1;
-  }
-return;
+    if (!defined $sTo) {
+        croak 'oldname missing!';
+    }
+    if (!defined $sFrom) {
+        croak 'newname missing!';
+    }
+    $sTo =~ s#/#\\#g;
+    if ($sTo =~ /^\\/ or $sTo =~ /^[a-z]:/i) {
+        $sTo = _normalize_path ($sTo);
+    }
+    else {
+        $sTo = $_UTF16->encode ($sTo) . "\x00";
+    }
+    if (!defined $sTo) {
+        return;
+    }
+    $sFrom = _normalize_path ($sFrom);
+    if (!defined $sFrom) {
+        return;
+    }
+    if (make_slink ($sTo, $sFrom)) {
+        set_last_error (0);
+        return 1;
+    }
+    return;
 }
 
 ###########
@@ -672,41 +693,51 @@ return;
 # OUTPUT: 1=success; undef=error
 ###########
 
-sub sysopenL
+sub sysopenL {
+    ##########
+    # o check parms
+    # o open file
+    ##########
+    my ($oFH, $sPath, $nMode) = @_;
+    if (!ref $oFH) {
+        croak 'filehandle reference missing!';
+    }
+    if (!defined $nMode) {
+        croak 'mode missing!';
+    }
+    if (!defined $sPath) {
+        croak 'path missing!';
+    }
+    $sPath = _normalize_path ($sPath);
+    if (!defined $sPath) {
+        return;
+    }
+    my ($nAccess, $nCreate);
 
-{
-##########
-# o check parms
-# o open file
-##########
+    if ($nMode & O_WRONLY) {
+        $nAccess = $GENERIC_WRITE;
+    }
+    elsif ($nMode & O_RDWR) {
+        $nAccess = $GENERIC_RW;
+    }
+    else {
+        $nAccess = $GENERIC_READ;
+    }
 
-my ($oFH, $sPath, $nMode) = @_;
-if (!ref $oFH)
-  { croak 'filehandle reference missing!'; }
-if (!defined $nMode)
-  { croak 'mode missing!'; }
-if (!defined $sPath)
-  { croak 'path missing!'; }
-$sPath = _normalize_path ($sPath);
-if (!defined $sPath)
-  { return; }
-my ($nAccess, $nCreate);
-if ($nMode & O_WRONLY)
-  { $nAccess = $GENERIC_WRITE; }
-elsif ($nMode & O_RDWR)
-  { $nAccess = $GENERIC_RW; }
-else
-  { $nAccess = $GENERIC_READ; }
-if ($nMode & O_TRUNC)
-  { $nCreate = $CREATE_ALWAYS; }
-elsif ($nMode & O_CREAT)
-  { $nCreate = $OPEN_ALWAYS; }
-else
-  { $nCreate = $OPEN_EXISTING; }
-$$oFH = create_file ($sPath, $nAccess, $nCreate, $nMode);
-if ($$oFH && ($nMode & O_BINARY))
-  { binmode $$oFH; }
-return $$oFH ? 1 : undef;
+    if ($nMode & O_TRUNC) {
+        $nCreate = $CREATE_ALWAYS;
+    }
+    elsif ($nMode & O_CREAT) {
+        $nCreate = $OPEN_ALWAYS;
+    }
+    else {
+        $nCreate = $OPEN_EXISTING;
+    }
+    $$oFH = create_file ($sPath, $nAccess, $nCreate, $nMode);
+    if ($$oFH && ($nMode & O_BINARY)) {
+        binmode $$oFH;
+    }
+    return $$oFH ? 1 : undef;
 }
 
 ###########
@@ -718,67 +749,69 @@ return $$oFH ? 1 : undef;
 # OUTPUT: success=1; fail=''; undef=error
 ###########
 
-sub testL
+sub testL {
+    ###########
+    # o valid test?
+    # o get stat
+    # o check test
+    ###########
 
-{
-###########
-# o valid test?
-# o get stat
-# o check test
-###########
-
-my $sTest = shift;
-if ($sTest !~ /^[bcdeflOoRrsWwXxz]$/)
-  { croak 'invalid test!'; }
-my $oStat = $sTest eq 'l' ? lstatL (shift) : statL (shift);
-if (!defined $oStat)
-  { return; }
-my $nRet = '';
-if ($sTest eq 'd')
-  {
-  if ($oStat->{mode} & S_IFDIR)
-    { $nRet = 1; }
-  }
-elsif ($sTest eq 'e')
-  { $nRet = 1; }
-elsif ($sTest eq 'f')
-  {
-  if (!($oStat->{attribs} & $NOFILE))
-    { $nRet = 1; }
-  }
-elsif ($sTest eq 'l')
-  {
-  if ($oStat->{attribs} & FILE_ATTRIBUTE_REPARSE_POINT)
-    { $nRet = 1; }
-  }
-elsif ($sTest =~ /o/i)
-  { $nRet = 1; }
-elsif ($sTest =~ /r/i)
-  {
-  if ($oStat->{mode} & S_IRUSR)
-    { $nRet = 1; }
-  }
-elsif ($sTest eq 's')
-  {
-  if ($oStat->{size})
-    { $nRet = $oStat->{size}; }
-  }
-elsif ($sTest =~ /w/i)
-  {
-  if ($oStat->{mode} & S_IWUSR)
-    { $nRet = 1; }
-  }
-elsif ($sTest =~ /x/i)
-  {
-  if ($oStat->{mode} & S_IXUSR)
-    { $nRet = 1; }
-  }
-elsif ($sTest eq 'z')
-  {
-  if (!$oStat->{size})
-    { $nRet = 1; }
-  }
-return $nRet;
+    my $sTest = shift;
+    if ($sTest !~ /^[bcdeflOoRrsWwXxz]$/) {
+        croak 'invalid test!';
+    }
+    my $oStat = $sTest eq 'l' ? lstatL (shift) : statL (shift);
+    if (!defined $oStat) {
+        return;
+    }
+    my $nRet = '';
+    if ($sTest eq 'd') {
+        if ($oStat->{mode} & S_IFDIR) {
+            $nRet = 1;
+        }
+    }
+    elsif ($sTest eq 'e') {
+        $nRet = 1;
+    }
+    elsif ($sTest eq 'f') {
+        if (!($oStat->{attribs} & $NOFILE)) {
+            $nRet = 1;
+        }
+    }
+    elsif ($sTest eq 'l') {
+        if ($oStat->{attribs} & FILE_ATTRIBUTE_REPARSE_POINT) {
+            $nRet = 1;
+        }
+    }
+    elsif ($sTest =~ /o/i) {
+        $nRet = 1;
+    }
+    elsif ($sTest =~ /r/i) {
+        if ($oStat->{mode} & S_IRUSR) {
+            $nRet = 1;
+        }
+    }
+    elsif ($sTest eq 's') {
+        if ($oStat->{size}) {
+            $nRet = $oStat->{size};
+        }
+    }
+    elsif ($sTest =~ /w/i) {
+        if ($oStat->{mode} & S_IWUSR) {
+            $nRet = 1;
+        }
+    }
+    elsif ($sTest =~ /x/i) {
+        if ($oStat->{mode} & S_IXUSR) {
+            $nRet = 1;
+        }
+    }
+    elsif ($sTest eq 'z') {
+        if (!$oStat->{size}) {
+            $nRet = 1;
+        }
+    }
+    return $nRet;
 }
 
 ###########
@@ -789,46 +822,41 @@ return $nRet;
 # OUTPUT: number of files deleted; undef=error
 ###########
 
-sub unlinkL
+sub unlinkL {
+    ##########
+    # o get default path if undef
+    # o delete each file
+    ##########
 
-{
-##########
-# o get default path if undef
-# o delete each file
-##########
-
-my @sPaths = @_;
-if (!@sPaths)
-  { push @sPaths, $_; }
-my $nFiles = 0;
-my $nErr = 0;
-foreach my $sPath (@sPaths)
-  {
-  $sPath = _normalize_path ($sPath);
-  if (!defined $sPath)
-    {
-    $nErr = get_last_error ();
-    next;
+    my @sPaths = @_;
+    if (!@sPaths) {
+        push @sPaths, $_;
     }
-  if (remove_file ($sPath))
-    { $nFiles++; }
-  else
-    {
-    $nErr = get_last_error ();
-    next;
+    my $nFiles = 0;
+    my $nErr = 0;
+    foreach my $sPath (@sPaths) {
+        $sPath = _normalize_path ($sPath);
+        if (!defined $sPath) {
+            $nErr = get_last_error ();
+            next;
+        }
+        if (remove_file ($sPath)) {
+            $nFiles++;
+        }
+        else {
+            $nErr = get_last_error ();
+            next;
+        }
     }
-  }
 
-##########
-# errors?
-##########
-
-if ($nErr)
-  {
-  set_last_error ($nErr);
-  return;
-  }
-return $nFiles;
+    ##########
+    # errors?
+    ##########
+    if ($nErr) {
+        set_last_error ($nErr);
+        return;
+    }
+    return $nFiles;
 }
 
 ###########
@@ -841,47 +869,48 @@ return $nFiles;
 # OUTPUT: number of files changed; undef=error
 ###########
 
-sub utimeL
+sub utimeL {
+    ##########
+    # o get times and files
+    # o process each file
+    ##########
 
-{
-##########
-# o get times and files
-# o process each file
-##########
+    my ($nATime, $nMTime, @sPaths) = @_;
 
-my ($nATime, $nMTime, @sPaths) = @_;
-if (!defined $nATime && !defined $nMTime)
-  { $nATime = $nMTime = time; }
-if (!defined $nATime)
-  { $nATime = 0; }
-if (!defined $nMTime)
-  { $nMTime = 0; }
-my $nFiles = 0;
-my $nErr = 0;
-foreach my $sPath (@sPaths)
-  {
-  $sPath = _normalize_path ($sPath);
-  if (!defined $sPath)
-    {
-    $nErr = get_last_error ();
-    next;
+    if (!defined $nATime && !defined $nMTime) {
+        $nATime = $nMTime = time;
     }
-  if (set_filetime ($nATime, $nMTime, $sPath))
-    { $nFiles++; }
-  else
-    {
-    $nErr = get_last_error ();
-    next;
+    if (!defined $nATime) {
+        $nATime = 0;
     }
-  }
+    if (!defined $nMTime) {
+        $nMTime = 0;
+    }
+    my $nFiles = 0;
+    my $nErr = 0;
+    foreach my $sPath (@sPaths) {
+        $sPath = _normalize_path ($sPath);
+        if (!defined $sPath) {
+            $nErr = get_last_error ();
+            next;
+        }
+        if (set_filetime ($nATime, $nMTime, $sPath)) {
+            $nFiles++;
+        }
+        else {
+            $nErr = get_last_error ();
+            next;
+        }
+    }
 
-##########
-# errors?
-##########
+    ##########
+    # errors?
+    ##########
 
-if ($nErr)
-  { set_last_error ($nErr); }
-return $nFiles;
+    if ($nErr) {
+        set_last_error ($nErr);
+    }
+    return $nFiles;
 }
 
 ###########
@@ -892,30 +921,30 @@ return $nFiles;
 # OUTPUT: volume object; undef=error
 ###########
 
-sub volinfoL
+sub volinfoL {
+    ###########
+    # o get fullpath
+    # o limit to root
+    # o get volume info
+    ###########
 
-{
-###########
-# o get fullpath
-# o limit to root
-# o get volume info
-###########
-
-my $sPath = abspathL (shift);
-if (!defined $sPath)
-  { return; }
-if ($sPath =~ /^([a-z]:)/i)
-  { $sPath = "$1\\"; }
-else
-  {
-  $sPath =~ /^(\\\\[^\\]+\\[^\\]+)/;
-  $sPath = "$1\\";
-  }
-my $oVol = get_vol_info (_normalize_path ($sPath));
-if (!defined $oVol)
-  { return; }
-$oVol->{name} = _wide_to_utf8 ($oVol->{name});
-return $oVol;
+    my $sPath = abspathL (shift);
+    if (!defined $sPath) {
+        return;
+    }
+    if ($sPath =~ /^([a-z]:)/i) {
+        $sPath = "$1\\";
+    }
+    else {
+        $sPath =~ /^(\\\\[^\\]+\\[^\\]+)/;
+        $sPath = "$1\\";
+    }
+    my $oVol = get_vol_info (_normalize_path ($sPath));
+    if (!defined $oVol) {
+        return;
+    }
+    $oVol->{name} = _wide_to_utf8 ($oVol->{name});
+    return $oVol;
 }
 
 ##########
@@ -929,46 +958,42 @@ return $oVol;
 # OUTPUT: close handle
 ###########
 
-sub closedirL
+sub closedirL {
+    ###########
+    # close if handle already open
+    ###########
 
-{
-###########
-# close if handle already open
-###########
-
-my $self = shift;
-if (!defined $self->{handle})
-  { croak 'no directory open!'; }
-$self->find_close ();
-delete $self->{handle};
-return 1;
+    my $self = shift;
+    if (!defined $self->{handle}) {
+        croak 'no directory open!';
+    }
+    $self->find_close ();
+    delete $self->{handle};
+    return 1;
 }
 
 ##########
 # destructor
 ##########
 
-sub DESTROY
+sub DESTROY {
+    ##########
+    # close handle
+    ##########
 
-{
-##########
-# close handle
-##########
-
-my $self = shift;
-if (defined $self->{handle})
-  { $self->find_close (); }
-return;
+    my $self = shift;
+    if (defined $self->{handle}) {
+        $self->find_close ();
+    }
+    return;
 }
 
 ###########
 # Create Directory Object
 ###########
 
-sub new
-
-{
-return bless { }, shift;
+sub new {
+    return bless { }, shift;
 }
 
 ###########
@@ -979,31 +1004,33 @@ return bless { }, shift;
 # OUTPUT: 1=success, undef=error
 ###########
 
-sub opendirL
+sub opendirL {
+    ###########
+    # o close if handle already open
+    # o normalize path
+    # o find first file
+    # o return opendir object
+    ###########
 
-{
-###########
-# o close if handle already open
-# o normalize path
-# o find first file
-# o return opendir object
-###########
-
-my ($self, $sDir) = @_;
-if (defined $self->{handle})
-  { $self->find_close (); }
-if (!defined $sDir)
-  { $sDir = '.'; }
-my $sPath = _normalize_path ($sDir);
-if (!defined $sPath)
-  { return; }
-$self->{dirpath} = _denormalize_path ($sPath);
-$self->find_first_file (_normalize_path (catfile ($sDir, '*')));
-if ($self->{handle} == 4294967295)
-  { return; }
-$self->{first} = _denormalize_path ($self->{first});
-set_last_error (0);
-return 1;
+    my ($self, $sDir) = @_;
+    if (defined $self->{handle}) {
+        $self->find_close ();
+    }
+    if (!defined $sDir) {
+        $sDir = '.';
+    }
+    my $sPath = _normalize_path ($sDir);
+    if (!defined $sPath) {
+        return;
+    }
+    $self->{dirpath} = _denormalize_path ($sPath);
+    $self->find_first_file (_normalize_path (catfile ($sDir, '*')));
+    if ($self->{handle} == 4294967295) {
+        return;
+    }
+    $self->{first} = _denormalize_path ($self->{first});
+    set_last_error (0);
+    return 1;
 }
 
 ###########
@@ -1015,34 +1042,33 @@ return 1;
 #   otherwise next entry or undef if none
 ###########
 
-sub readdirL
+sub readdirL {
+    ###########
+    # o check for first entry from opendir
+    # o retrieve entries
+    # o return entries
+    ###########
 
-{
-###########
-# o check for first entry from opendir
-# o retrieve entries
-# o return entries
-###########
-
-my $self = shift;
-if (!defined $self->{handle})
-  { croak 'no directory open!'; }
-my $bList = wantarray;
-my @sDirs;
-if ($self->{first} ne '')
-  {
-  push @sDirs, $self->{first};
-  $self->{first} = '';
-  if (!$bList)
-    { return $sDirs [0]; }
-  }
-while (defined (my $sDir = $self->find_next_file ()))
-  {
-  push @sDirs, _denormalize_path ($sDir);
-  if (!$bList)
-    { last; }
-  }
-return $bList ? @sDirs : pop @sDirs;
+    my $self = shift;
+    if (!defined $self->{handle}) {
+        croak 'no directory open!';
+    }
+    my $bList = wantarray;
+    my @sDirs;
+    if ($self->{first} ne '') {
+        push @sDirs, $self->{first};
+        $self->{first} = '';
+        if (!$bList) {
+            return $sDirs [0];
+        }
+    }
+    while (defined (my $sDir = $self->find_next_file ())) {
+        push @sDirs, _denormalize_path ($sDir);
+        if (!$bList) {
+            last;
+        }
+    }
+    return $bList ? @sDirs : pop @sDirs;
 }
 
 ##########
@@ -1057,22 +1083,21 @@ return $bList ? @sDirs : pop @sDirs;
 # OUTPUT: denormalized path
 ###########
 
-sub _denormalize_path
+sub _denormalize_path {
+    ###########
+    # o convert to UTF-8
+    # o strip out trailing null
+    # o strip off extended path prefix
+    ###########
 
-{
-###########
-# o convert to UTF-8
-# o strip out trailing null
-# o strip off extended path prefix
-###########
-
-my $sPath = shift;
-if (!defined $sPath)
-  { return $sPath; }
-$sPath = _wide_to_utf8 ($sPath);
-$sPath =~ s/^\\\\\?\\UNC/\\/;
-$sPath =~ s/^\\\\\?\\//;
-return $sPath;
+    my $sPath = shift;
+    if (!defined $sPath) {
+        return $sPath;
+    }
+    $sPath = _wide_to_utf8 ($sPath);
+    $sPath =~ s/^\\\\\?\\UNC/\\/;
+    $sPath =~ s/^\\\\\?\\//;
+    return $sPath;
 }
 
 ###########
@@ -1083,105 +1108,103 @@ return $sPath;
 # OUTPUT: normalized path
 ###########
 
-sub _normalize_path
-
-{
-###########
-# o make sure using backslashes for separator
-# o extended path?
-###########
-
-my $sPath = shift;
-if (!defined $sPath)
-  { return $sPath; }
-$sPath =~ s#/#\\#g;
-if ($sPath !~ /^\\\\\?\\/)
-  {
-  ###########
-  # add root path if missing
-  ###########
-
-  if ($sPath !~ /^\\\\/ && $sPath !~ /^[a-z]:/i)
-    {
-    if ($sPath !~ /^\\/)
-      { $sPath = getcwdL () . "\\$sPath"; }
-    else
-      {
-      my $sRoot = getcwdL ();
-      if ($sRoot =~ /^(\\\\[^\\]+\\[^\\]+)/)
-        { $sPath = "$1$sPath"; }
-      elsif ($sRoot =~ /([a-z]:)/i)
-        { $sPath = "$1$sPath"; }
-      }
-    }
-  if ($sPath =~ /^([a-z]:)[^\\+]\\/i)
-    {
+sub _normalize_path {
     ###########
-    # o switch drive
-    # o add root path
-    # o switch drive back
+    # o make sure using backslashes for separator
+    # o extended path?
     ###########
 
-    my $sDrive = $1;
-    my $sCurDir = getcwdL ();
-    if (!chdirL ($sDrive))
-      { return; }
-    $sPath = getcwdL () . substr ($sPath, 2);
-    if (!chdirL ($sCurDir))
-      { return; }
+    my $sPath = shift;
+    if (!defined $sPath) {
+        return $sPath;
+    }
+    $sPath =~ s#/#\\#g;
+    if ($sPath !~ /^\\\\\?\\/) {
+        ###########
+        # add root path if missing
+        ###########
+
+        if ($sPath !~ /^\\\\/ && $sPath !~ /^[a-z]:/i) {
+            if ($sPath !~ /^\\/) {
+                $sPath = getcwdL () . "\\$sPath";
+            }
+            else {
+                my $sRoot = getcwdL ();
+                if ($sRoot =~ /^(\\\\[^\\]+\\[^\\]+)/) {
+                    $sPath = "$1$sPath";
+                }
+                elsif ($sRoot =~ /([a-z]:)/i) {
+                    $sPath = "$1$sPath";
+                }
+            }
+        }
+        if ($sPath =~ /^([a-z]:)[^\\+]\\/i) {
+            ###########
+            # o switch drive
+            # o add root path
+            # o switch drive back
+            ###########
+
+            my $sDrive = $1;
+            my $sCurDir = getcwdL ();
+            if (!chdirL ($sDrive)) {
+                return;
+            }
+            $sPath = getcwdL () . substr ($sPath, 2);
+            if (!chdirL ($sCurDir)) {
+                return;
+            }
+        }
+
+        ###########
+        # strip off volume (drive letter or UNC)
+        ###########
+
+        my $sVol;
+        if ($sPath =~ /^([a-z]:)(.*)/i) {
+            ($sVol, $sPath) = ($1, $2);
+        }
+        elsif ($sPath =~ /^\\(\\[^\\]+\\[^\\]+)(.*)/) {
+            ($sVol, $sPath) = ($1, $2);
+        }
+        else {
+            set_last_error (3);
+            return;
+        }
+
+        ###########
+        # remove relative dirs
+        ###########
+
+        my @sNewDirs;
+        foreach my $sDir (split /\\/, $sPath) {
+            if ($sDir eq '' or $sDir eq '.') {
+                next;
+            }
+            if ($sDir ne '..') {
+                push @sNewDirs, $sDir;
+                next;
+            }
+            if (!@sNewDirs) {
+                set_last_error (3);
+                return;
+            }
+            pop @sNewDirs;
+        }
+
+        ###########
+        # o return to the original path
+        # o form extended path
+        ###########
+
+        $sPath = '\\\\?\\' . ($sVol =~ /\\/ ? 'UNC' : '') . "$sVol\\" . join ('\\', @sNewDirs);
     }
 
-  ###########
-  # strip off volume (drive letter or UNC)
-  ###########
+    ###########
+    # convert to UTF-16 and add trailing null
+    ###########
 
-  my $sVol;
-  if ($sPath =~ /^([a-z]:)(.*)/i)
-    { ($sVol, $sPath) = ($1, $2); }
-  elsif ($sPath =~ /^\\(\\[^\\]+\\[^\\]+)(.*)/)
-    { ($sVol, $sPath) = ($1, $2); }
-  else
-    {
-    set_last_error (3);
-    return;
-    }
-
-  ###########
-  # remove relative dirs
-  ###########
-
-  my @sNewDirs;
-  foreach my $sDir (split /\\/, $sPath)
-    {
-    if ($sDir eq '' or $sDir eq '.')
-      { next; }
-    if ($sDir ne '..')
-      {
-      push @sNewDirs, $sDir;
-      next;
-      }
-    if (!@sNewDirs)
-      {
-      set_last_error (3);
-      return;
-      }
-    pop @sNewDirs;
-    }
-
-  ###########
-  # o return to the original path
-  # o form extended path
-  ###########
-
-  $sPath = '\\\\?\\' . ($sVol =~ /\\/ ? 'UNC' : '')
-    . "$sVol\\" . join ('\\', @sNewDirs);
-  }
-
-###########
-# convert to UTF-16 and add trailing null
-###########
-
-return $_UTF16->encode ($sPath) . "\x00";
+    return $_UTF16->encode ($sPath) . "\x00";
 }
 
 ###########
@@ -1192,12 +1215,10 @@ return $_UTF16->encode ($sPath) . "\x00";
 # OUTPUT: Perl UTF-8 string
 ###########
 
-sub _wide_to_utf8
-
-{
-my $sText = $_UTF16->decode (shift);
-$sText =~ s/\x00$//;
-return $sText;
+sub _wide_to_utf8 {
+    my $sText = $_UTF16->decode (shift);
+    $sText =~ s/\x00$//;
+    return $sText;
 }
 
 1;
