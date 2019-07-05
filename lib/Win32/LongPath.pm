@@ -619,7 +619,7 @@ sub statL {
     if ($COMPAT_MODE) {
         return $oStat;
     }
-    $result = $oStat;
+    my $result = $oStat;
     my @retval = ();
     for my $k (qw/dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks/) {
         if (!exists $result->{$k}) {
