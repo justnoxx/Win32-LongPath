@@ -8,9 +8,11 @@ use 5.008_000;
 use base 'Exporter';
 use strict;
 use warnings;
-use  Symbol;
+no warnings qw/redefine/;
+use Symbol;
 use Data::Dumper;
 use Carp;
+
 require Encode;
 use Fcntl qw(O_APPEND O_BINARY O_CREAT O_RDONLY O_RDWR O_TRUNC O_WRONLY :mode);
 use File::Spec::Functions;
@@ -66,7 +68,7 @@ sub FILE_VOLUME_QUOTAS () {0x00000020}
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS, $VERSION);
 BEGIN {
     my @aFuncs =
-        qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL unlinkL utimeL volinfoL rmtree);
+        qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL unlinkL utimeL volinfoL rmtree mkpath);
     my @aAttribs = qw(
         FILE_ATTRIBUTE_ARCHIVE
         FILE_ATTRIBUTE_COMPRESSED
@@ -1231,7 +1233,6 @@ sub _wide_to_utf8 {
 sub rmtree {
     my ($roots, $verbose, $safe) = @_;
 
-    print "Using custom rmtree\n";
     my $Is_VMS = 0;
     my $force_writeable = 0;
 
@@ -1326,6 +1327,38 @@ sub rmtree {
     }
     $count;
 }
+
+
+sub mkpath {
+    my($paths, $verbose, $mode) = @_;
+    # $paths   -- either a path string or ref to list of paths
+    # $verbose -- optional print "mkdir $path" for each directory created
+    # $mode    -- optional permissions, defaults to 0777
+    my $Is_MacOS = 0;
+    my $Is_VMS = 0;
+    local($") = $Is_MacOS ? ":" : "/";
+    $mode = 0777 unless defined($mode);
+    $paths = [$paths] unless ref $paths;
+    my(@created,$path);
+    foreach $path (@$paths) {
+        if (testL('d', $path)) {
+            next;
+        }
+        my $parent = File::Basename::dirname($path);
+        unless (testL('d', $parent) or $path eq $parent) {
+            push (@created,mkpath($parent, $verbose, $mode));
+        }
+        print "mkdir $path\n" if $verbose;
+        unless (mkdirL($path, $mode)) {
+            my $e = $!;
+            # allow for another process to have created it meanwhile
+            $! = $e, croak ("mkdir $path: $e") unless testL($path);
+        }
+        push(@created, $path);
+    }
+    @created;
+}
+
 
 1;
 
