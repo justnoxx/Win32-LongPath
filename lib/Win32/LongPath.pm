@@ -68,7 +68,7 @@ sub FILE_VOLUME_QUOTAS () {0x00000020}
 our (@EXPORT, @EXPORT_OK, %EXPORT_TAGS, $VERSION);
 BEGIN {
     my @aFuncs =
-        qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL unlinkL utimeL volinfoL rmtree mkpath);
+        qw(abspathL attribL chdirL copyL getcwdL linkL lstatL mkdirL openL readlinkL renameL rmdirL shortpathL statL symlinkL sysopenL testL unlinkL utimeL volinfoL rmtree mkpath _lstatL _statL);
     my @aAttribs = qw(
         FILE_ATTRIBUTE_ARCHIVE
         FILE_ATTRIBUTE_COMPRESSED
@@ -372,6 +372,20 @@ sub linkL {
 # OUTPUT: status object; undef=error
 ###########
 
+
+sub _lstatL {
+    my (@params) = @_;
+
+    my $result = lstatL(@params);
+    my @retval = ();
+    for my $k (qw/dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks/) {
+        if (!exists $result->{$k}) {
+            $result->{$k} = '';
+        }
+        push @retval, $result->{$k};
+    }
+    return @retval;
+}
 sub lstatL {
     return statL (shift, 1);
 }
@@ -601,6 +615,20 @@ sub shortpathL {
 #   [Arg (2)] = true then lstat
 # OUTPUT: status object; undef=error
 ###########
+
+sub _statL {
+    my (@params) = @_;
+
+    my $result = statL(@params);
+    my @retval = ();
+    for my $k (qw/dev ino mode nlink uid gid rdev size atime mtime ctime blksize blocks/) {
+        if (!exists $result->{$k}) {
+            $result->{$k} = '';
+        }
+        push @retval, $result->{$k};
+    }
+    return @retval;
+}
 
 sub statL {
     ##########
